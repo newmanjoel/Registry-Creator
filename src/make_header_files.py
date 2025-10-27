@@ -69,7 +69,7 @@ def get_uint_type(width:int) -> str:
     else:
         return "uint64_t"
     
-def generate_assignment_lines(bitfields, width):
+def generate_assignment_lines(bitfields, width) -> str:
     """Generate C++ lines for operator= assignments."""
     lines = []
     # lines.append(f"    {get_uint_type(width)} mask = 1; // ensure correct width")
@@ -80,12 +80,25 @@ def generate_assignment_lines(bitfields, width):
     for bf in bitfields:  # Reverse for bit numbering from MSB->LSB
         hi, lo = bf['hi'], bf['lo']
         name = bf['name']
-        if bf['bits'] == 1:
-            lines.append(f"        {name:<{max_name_width}} = (n >> {lo}) & 0x1;")
-        else:
-            mask = hex((1 << bf['bits']) - 1)
-            lines.append(f"        {name:<{max_name_width}} = (n >> {lo}) & {mask};")
+        mask = f"0x{(1 << bf['bits']) - 1:0{width//4}X}"
+        lines.append(f"\t\t{name:<{max_name_width}} = (n >> {lo}) & {mask};")
     
+    return "\n".join(lines)
+
+def generate_combining_lines(bitfields, width) -> str:
+    """Generate C++ lines for operator= assignments."""
+    lines = []
+    # lines.append(f"    {get_uint_type(width)} mask = 1; // ensure correct width")
+
+    just_names = map(lambda x: x["name"], bitfields)
+    max_name_width= max(map(len, just_names))
+
+    for bf in bitfields:  # Reverse for bit numbering from MSB->LSB
+        hi, lo = bf['hi'], bf['lo']
+        name = bf['name']
+        mask = f"0x{(1 << bf['bits']) - 1:0{width//4}X}"
+        lines.append(f"\t\tn |= ({name:<{max_name_width}} & {mask}) << {lo};")
+        
     return "\n".join(lines)
 
 def generate_cpp_struct(reg_row:pd.Series, bitfields:list[dict[str,Any]]) -> list[str]:
@@ -112,10 +125,20 @@ def generate_cpp_struct(reg_row:pd.Series, bitfields:list[dict[str,Any]]) -> lis
     
     # operator= overload
     lines.append("")
-    lines.append(f"    {name}& operator=({get_uint_type(width)} n) {{")
+    lines.append(f"\t{name}& operator=({get_uint_type(width)} n) {{")
     lines.append(generate_assignment_lines(bitfields, width))
-    lines.append("        return *this;")
-    lines.append("    };")
+    lines.append("\t\treturn *this;")
+    lines.append("\t};")
+
+    unit_type = get_uint_type(width)
+    # to_uint8() 
+    lines.append("")
+    lines.append(f"\t{unit_type} to_{unit_type}() const {{")
+    lines.append(f"\t\t{unit_type} n = 0;")
+    lines.append(generate_combining_lines(bitfields, width))
+    lines.append("\t\treturn n;")
+    lines.append("\t};")
+
 
     lines.append("};\n")
     # lines.reverse()
